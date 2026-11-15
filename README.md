@@ -73,9 +73,10 @@ already have, put it in a folder of that site, `wiki/` by default, with
 | `pages` (default) | The whole Pages site | This action |
 | `branch` | A folder of the branch Pages serves, such as `gh-pages` | This action pushes; Pages serves the branch |
 | `none` | A folder on the runner, returned as `site-path` | Your workflow |
+| `auto` | `pages` or `branch`, read from the Pages settings | This action |
 
 `path` names the folder, such as `docs/code`. Links in the Wiki include it,
-so the Wiki only works at that address.
+so the Wiki only works in that folder.
 
 **Your site is served from a branch.** Keep **Deploy from a branch** under
 **Settings > Pages**, and let the action commit the Wiki into the branch:
@@ -98,11 +99,17 @@ jobs:
           deploy: branch
 ```
 
-The Wiki appears at `https://<owner>.github.io/<repo>/wiki/`. The action only
-replaces a folder it wrote before; it stops if the folder holds anything else.
-It also stops if Pages builds the branch with Jekyll, which would leave out
-some of the Wiki's files; an empty `.nojekyll` file at the branch root turns
-Jekyll off. A branch that does not exist yet is created.
+The Wiki appears at `https://<owner>.github.io/<repo>/wiki/`, and the rest of
+the branch stays as it is. The action stops without writing when:
+
+- the folder holds something other than a Wiki it wrote before;
+- Pages builds the branch with Jekyll, which would leave out some of the
+  Wiki's files; an empty `.nojekyll` file at the site root turns Jekyll off;
+- Pages serves the repository's default branch.
+
+A tool that rewrites the whole branch on each deploy, such as
+`mkdocs gh-deploy`, removes the Wiki's folder until the next run. Keep that
+folder in its deploy, or use `none`.
 
 **Your site is deployed by its own workflow.** Build the Wiki in your deploy
 job, which keeps its permissions and environment, and deploy both together:
@@ -114,12 +121,43 @@ job, which keeps its permissions and environment, and deploy both together:
         with:
           api-key: ${{ secrets.OPENROUTER_API_KEY }}
           deploy: none
-      - run: cp -R "${{ steps.wiki.outputs.site-path }}" dist/wiki
+      - run: cp -R "${{ steps.wiki.outputs.site-path }}" dist/wiki # the folder named by path, wiki by default
       - uses: actions/upload-pages-artifact@v5
         with:
           path: dist
       - uses: actions/deploy-pages@v5
 ```
+
+**Let the action choose.** `deploy: auto` reads the Pages settings and picks
+for you. When Pages serves a branch, it writes the Wiki into that branch. When
+Pages is set to **GitHub Actions** and has nothing deployed yet, or already
+serves this Wiki, it deploys the Wiki as the whole site. It never replaces
+another site: when one is deployed by another workflow, or it cannot tell, it
+stops and points to `none`.
+
+```yaml
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+  # deployments: read, in a private repository
+
+jobs:
+  wiki:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: sysevol-ai/wiki-action@v1
+        with:
+          api-key: ${{ secrets.OPENROUTER_API_KEY }}
+          deploy: auto
+```
+
+Leave `environment: github-pages` off this job. When Pages serves a branch,
+that environment only accepts deployments from the branch, so the job would
+not start.
 
 The address, custom domains included, comes from the repository's Pages
 settings. To serve the Wiki from another host, set `base-path` to the full URL

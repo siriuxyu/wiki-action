@@ -6,9 +6,10 @@
 # Writes the built Wiki into one folder of the branch that GitHub Pages serves
 # and pushes it, leaving the rest of that branch alone.
 #
-# Inputs (environment): INPUT_REPOSITORY_PATH, BRANCH, WIKI_PATH, SITE_PATH,
-# RUNNER_TEMP. The checkout's credentials push the commit, so the workflow
-# needs `contents: write`.
+# Inputs (environment): INPUT_REPOSITORY_PATH, BRANCH, WIKI_PATH (the folder
+# in the branch), PAGES_ROOT (the folder Pages serves as the site root, empty
+# or docs), SITE_PATH, RUNNER_TEMP. The checkout's credentials push the commit,
+# so the workflow needs `contents: write`.
 set -euo pipefail
 
 fail() {
@@ -32,7 +33,7 @@ rm -rf "$work"
 git -C "$repo" worktree prune
 
 created=false
-if git -C "$repo" ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
+if git -C "$repo" ls-remote --exit-code origin "refs/heads/$BRANCH" >/dev/null 2>&1; then
   git -C "$repo" fetch --no-tags --depth=1 origin "+refs/heads/$BRANCH:$remote_ref"
   git -C "$repo" worktree add --quiet --detach "$work" "$remote_ref"
 else
@@ -45,19 +46,22 @@ else
 fi
 
 target="$work/$WIKI_PATH"
+root="$work${PAGES_ROOT:+/$PAGES_ROOT}"
+nojekyll="${PAGES_ROOT:+$PAGES_ROOT/}.nojekyll"
 
 # Never replace a folder that the last run did not write.
 if [[ -e "$target" && ! -f "$target/codenib-static.json" ]]; then
-  fail "$BRANCH already has $WIKI_PATH/ and it is not a CodeNib Wiki. Choose another path."
+  fail "$BRANCH already has $WIKI_PATH/, and it is not a CodeNib Wiki, so the action leaves it alone. To publish the Wiki into another folder, add a line such as path: code-wiki under with: for this action in the workflow, then run it again."
 fi
 
 # A branch built by Jekyll drops files whose names start with an underscore.
 if [[ "$created" == true ]]; then
-  touch "$work/.nojekyll"
-elif [[ ! -e "$work/.nojekyll" ]]; then
+  mkdir -p "$root"
+  touch "$root/.nojekyll"
+elif [[ ! -e "$root/.nojekyll" ]]; then
   hidden="$(cd "$site" && find . -name '_*' -print -quit)"
   if [[ -n "$hidden" ]]; then
-    fail "GitHub Pages builds $BRANCH with Jekyll, which leaves out files such as ${hidden#./}. Add an empty .nojekyll file to the root of $BRANCH if the site does not need Jekyll, or use deploy: none."
+    fail "GitHub Pages builds $BRANCH with Jekyll, which leaves out files such as ${hidden#./}. Add an empty $nojekyll file to $BRANCH if the site does not need Jekyll, or use deploy: none."
   fi
 fi
 
@@ -66,7 +70,7 @@ mkdir -p "$target"
 cp -R "$site/." "$target/"
 
 git -C "$work" add -A -- "$WIKI_PATH"
-[[ "$created" == true ]] && git -C "$work" add -- .nojekyll
+[[ "$created" == true ]] && git -C "$work" add -- "$nojekyll"
 if git -C "$work" diff --cached --quiet; then
   echo "The Wiki in $BRANCH:$WIKI_PATH is already up to date."
   exit 0
@@ -95,4 +99,4 @@ for attempt in 1 2 3; do
     fail "Another push changed $WIKI_PATH/ on $BRANCH at the same time. Run the workflow again."
   fi
 done
-fail "Could not push to $BRANCH. Check that the workflow grants contents: write."
+fail "Could not push to $BRANCH. Check that the workflow grants contents: write, that actions/checkout keeps its credentials (persist-credentials is not false), and that no branch protection rule blocks the push."
